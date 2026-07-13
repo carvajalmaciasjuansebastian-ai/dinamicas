@@ -1,46 +1,109 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const sqlite3 = require('sqlite3').verbose();
+const { Telegraf } = require('telegraf'); // Tu bot sigue disponible aquí
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware obligatorios
+// =========================================================================
+// MIDDLEWARES OBLIGATORIOS
+// =========================================================================
 app.use(cors());
 app.use(express.json());
-
-// Servir los archivos estáticos de la interfaz (asegúrate de que tu index.html esté en la misma carpeta o ajusta la ruta)
 app.use(express.static(path.join(__dirname)));
 
 // =========================================================================
-// ESTRUCTURA DE DATOS EN MEMORIA VOLÁTIL
-// Nota: Para producción real, se recomienda conectar MongoDB o PostgreSQL
+// CONFIGURACIÓN DE BASE DE DATOS PERSISTENTE (SQLite3)
+// =========================================================================
+// Guarda un archivo físico llamado 'suerte_real.db' para que NO se borren los datos al reiniciar en Render
+const db = new sqlite3.Database(path.join(__dirname, 'suerte_real.db'), (err) => {
+    if (err) console.error("Error al abrir SQLite:", err.message);
+    else console.log("🔒 Base de datos SQLite conectada con éxito.");
+});
+
+// Inicializar tablas esenciales si no existen
+db.serialize(() => {
+    // Tablas de Configuraciones de cada Sorteo (Precios, Premios, Cierres)
+    db.run(`CREATE TABLE IF NOT EXISTS configuraciones (
+        sorteo TEXT PRIMARY KEY,
+        fecha TEXT,
+        hora TEXT,
+        valor REAL,
+        p1 REAL,
+        p2 REAL,
+        p3 REAL
+    )`);
+
+    // Tabla de Boletas de Clientes
+    db.run(`CREATE TABLE IF NOT EXISTS boletas (
+        sorteo TEXT,
+        numero TEXT,
+        nombre TEXT,
+        whatsapp TEXT,
+        estado TEXT,
+        fechaRegistro TEXT,
+        PRIMARY KEY (sorteo, numero)
+    )`);
+
+    // Insertar sorteos por defecto iniciales si la tabla está vacía
+    db.run(`INSERT OR IGNORE INTO configuraciones VALUES ('dia', '', '', 15000, 1000000, 100000, 100000)`);
+    db.run(`INSERT OR IGNORE INTO configuraciones VALUES ('noche', '', '', 15000, 1000000, 100000, 100000)`);
+});
+
+// =========================================================================
+// 🤖 ESPACIO PARA TU BOT DE TELEGRAM (Telegraf)
+// =========================================================================
+// Puedes inicializar tu bot aquí abajo usando tu Token. 
+// Ejemplo:
+// const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN || 'TU_TOKEN_AQUÍ');
+// bot.start((ctx) => ctx.reply('¡Bienvenido a Suerte Real!'));
+// bot.launch();
 // =========================================================================
 
-// Base de datos de boletas indexada por sorteo
-let baseDatosBoletas = {
-    dia: {},
-    noche: {}
-};
-
-// Base de datos de configuraciones por sorteo
-let baseDatosConfiguraciones = {
-    dia: { fecha: '', hora: '', valor: 15000, p1: 1000000, p2: 100000, p3: 100000 },
-    noche: { fecha: '', hora: '', valor: 15000, p1: 1000000, p2: 100000, p3: 100000 }
-};
 
 // =========================================================================
-// ENDPOINTS DE LA API (PANEL ADMINISTRATIVO)
+// ENDPOINTS DE LA API (PANEL ADMINISTRATIVO INTERACTIVO)
 // =========================================================================
 
-// 1. Obtener todas las boletas de todos los sorteos
+// 1. Obtener todas las boletas estructuradas por sorteo
 app.get('/api/admin/boletas', (req, res) => {
-    res.json(baseDatosBoletas);
+    db.all("SELECT * FROM boletas", [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        const estructurada = {};
+        rows.forEach(row => {
+            if (!estructurada[row.sorteo]) estructurada[row.sorteo] = {};
+            estructurada[row.sorteo][row.numero] = {
+                nombre: row.nombre,
+                whatsapp: row.whatsapp,
+                estado: row.estado,
+                fechaRegistro: row.fechaRegistro
+            };
+        });
+        res.json(estructurada);
+    });
 });
 
 // 2. Obtener los parámetros de configuración de todos los sorteos
 app.get('/api/admin/configuraciones', (req, res) => {
-    res.json(baseDatosConfiguraciones);
+    db.all("SELECT * FROM configuraciones", [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        const estructurada = {};
+        rows.forEach(row => {
+            estructurada[row.sorteo] = {
+                fecha: row.fecha,
+                hora: row.hora,
+                valor: row.valor,
+                p1: row.p1,
+                p2: row.p2,
+                p3: row.p3
+            };
+        });
+        res.json(estructurada);
+    });
 });
 
 // 3. Crear dinámicamente un nuevo sorteo autónomo
@@ -48,104 +111,80 @@ app.post('/api/admin/crear-sorteo', (req, res) => {
     const { sorteo } = req.body;
     if (!sorteo) return res.status(400).json({ error: "Falta el identificador del sorteo." });
 
-    // Si el sorteo no existe en memoria, lo inicializamos de inmediato
-    if (!baseDatosBoletas[sorteo]) {
-        baseDatosBoletas[sorteo] = {};
-        baseDatosConfiguraciones[sorteo] = { 
-            fecha: '', 
-            hora: '', 
-            valor: 15000, 
-            p1: 0, 
-            p2: 0, 
-            p3: 0 
-        };
-    }
-    res.status(200).json({ mensaje: `Sorteo '${sorteo}' dado de alta exitosamente.` });
+    db.run(`INSERT OR IGNORE INTO configuraciones (sorteo, fecha, hora, valor, p1, p2, p3) VALUES (?, '', '', 15000, 0, 0, 0)`, 
+    [sorteo], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(200).json({ mensaje: `Sorteo '${sorteo}' creado en Base de Datos.` });
+    });
 });
 
 // 4. Configurar el valor de la boleta y el cierre automático
 app.post('/api/admin/configurar-cierre', (req, res) => {
     const { sorteo, fecha, hora, valor } = req.body;
-    if (!sorteo || !baseDatosConfiguraciones[sorteo]) {
-        return res.status(400).json({ error: "Sorteo inexistente o no especificado." });
-    }
-
-    baseDatosConfiguraciones[sorteo].fecha = fecha;
-    baseDatosConfiguraciones[sorteo].hora = hora;
-    baseDatosConfiguraciones[sorteo].valor = parseFloat(valor) || 0;
-
-    res.status(200).json({ mensaje: "Configuración de cierre y valor de boleta actualizados." });
+    
+    db.run(`UPDATE configuraciones SET fecha = ?, hora = ?, valor = ? WHERE sorteo = ?`,
+    [fecha, hora, parseFloat(valor) || 0, sorteo], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(200).json({ mensaje: "Configuración de tiempos y precios actualizada." });
+    });
 });
 
-// 5. Configurar el plan estructurado de premios
+// 5. Configurar el plan de premios
 app.post('/api/admin/configurar-premios', (req, res) => {
     const { sorteo, p1, p2, p3 } = req.body;
-    if (!sorteo || !baseDatosConfiguraciones[sorteo]) {
-        return res.status(400).json({ error: "Sorteo inexistente o no especificado." });
-    }
 
-    baseDatosConfiguraciones[sorteo].p1 = parseFloat(p1) || 0;
-    baseDatosConfiguraciones[sorteo].p2 = parseFloat(p2) || 0;
-    baseDatosConfiguraciones[sorteo].p3 = parseFloat(p3) || 0;
-
-    res.status(200).json({ mensaje: "Plan de premios salvado con éxito." });
+    db.run(`UPDATE configuraciones SET p1 = ?, p2 = ?, p3 = ? WHERE sorteo = ?`,
+    [parseFloat(p1) || 0, parseFloat(p2) || 0, parseFloat(p3) || 0, sorteo], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(200).json({ mensaje: "Plan de premios persistido en SQLite." });
+    });
 });
 
 // 6. Apartar un número específico (Estado: apartado)
 app.post('/api/admin/apartar', (req, res) => {
     const { sorteo, numero, nombre, whatsapp } = req.body;
-    if (!sorteo || !numero || !nombre || !whatsapp) {
-        return res.status(400).json({ error: "Datos insuficientes para procesar el apartado." });
-    }
+    const fecha = new Date().toISOString();
 
-    if (!baseDatosBoletas[sorteo]) baseDatosBoletas[sorteo] = {};
-
-    // Guardar o sobreescribir la boleta
-    baseDatosBoletas[sorteo][numero] = {
-        nombre,
-        whatsapp,
-        estado: 'apartado',
-        fechaRegistro: new Date().toISOString()
-    };
-
-    res.status(200).json({ mensaje: `Número ${numero} reservado.` });
+    db.run(`INSERT OR REPLACE INTO boletas (sorteo, numero, nombre, whatsapp, estado, fechaRegistro) VALUES (?, ?, ?, ?, 'apartado', ?)`,
+    [sorteo, numero, nombre, whatsapp, fecha], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(200).json({ mensaje: `Número ${numero} apartado con éxito.` });
+    });
 });
 
 // 7. Confirmar la compra de un número (Estado: pagado)
 app.post('/api/admin/confirmar-pago', (req, res) => {
     const { sorteo, numero } = req.body;
-    if (!sorteo || !numero || !baseDatosBoletas[sorteo] || !baseDatosBoletas[sorteo][numero]) {
-        return res.status(404).json({ error: "La boleta no se encuentra registrada o apartada." });
-    }
 
-    baseDatosBoletas[sorteo][numero].estado = 'pagado';
-    res.status(200).json({ mensaje: `Pago confirmado para el número ${numero}.` });
+    db.run(`UPDATE boletas SET estado = 'pagado' WHERE sorteo = ? AND numero = ?`,
+    [sorteo, numero], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(200).json({ mensaje: `Pago registrado para el número ${numero}.` });
+    });
 });
 
-// 8. Liberar un número (Remover el registro para volver a disponible)
+// 8. Liberar un número
 app.post('/api/admin/liberar', (req, res) => {
     const { sorteo, numero } = req.body;
-    if (!sorteo || !numero || !baseDatosBoletas[sorteo]) {
-        return res.status(400).json({ error: "Parámetros inválidos." });
-    }
 
-    if (baseDatosBoletas[sorteo][numero]) {
-        delete baseDatosBoletas[sorteo][numero];
-    }
-    res.status(200).json({ mensaje: `Número ${numero} liberado correctamente.` });
+    db.delete; db.run(`DELETE FROM boletas WHERE sorteo = ? AND numero = ?`,
+    [sorteo, numero], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(200).json({ mensaje: `Número ${numero} liberado de la base de datos.` });
+    });
 });
 
-// 9. Healthcheck para el contenedor de Render
+// 9. Healthcheck para Render
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
 
-// Enrutar cualquier otra petición al index.html (Single Page App Fallback)
+// Fallback universal para index.html
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // Inicializar Servidor
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor Administrativo Multi-Sorteo corriendo en el puerto ${PORT}`);
+    console.log(`🚀 Servidor Profesional Multi-Sorteo corriendo en el puerto ${PORT}`);
 });
