@@ -1,159 +1,151 @@
 const express = require('express');
 const cors = require('cors');
-const sqlite3 = require('sqlite3').verbose();
-const { Telegraf } = require('telegraf');
-
-// ==========================================
-// CONFIGURACIÓN POR VARIABLES DE ENTORNO
-// ==========================================
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const ADMIN_TELEGRAM_ID = parseInt(process.env.ADMIN_TELEGRAM_ID);
-const NOTIFICATIONS_CHAT_ID = process.env.NOTIFICATIONS_CHAT_ID; // Aquí irá tu ID: -1005534194581
-const PORT = process.env.PORT || 10000;
-// ==========================================
+const path = require('path');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware obligatorios
 app.use(cors());
 app.use(express.json());
 
-// Conexión a la Base de Datos
-const db = new sqlite3.Database('./rifa.db', (err) => {
-    if (err) console.error("Error en DB:", err.message);
-    console.log('Base de datos SQLite lista para operar.');
+// Servir los archivos estáticos de la interfaz (asegúrate de que tu index.html esté en la misma carpeta o ajusta la ruta)
+app.use(express.static(path.join(__dirname)));
+
+// =========================================================================
+// ESTRUCTURA DE DATOS EN MEMORIA VOLÁTIL
+// Nota: Para producción real, se recomienda conectar MongoDB o PostgreSQL
+// =========================================================================
+
+// Base de datos de boletas indexada por sorteo
+let baseDatosBoletas = {
+    dia: {},
+    noche: {}
+};
+
+// Base de datos de configuraciones por sorteo
+let baseDatosConfiguraciones = {
+    dia: { fecha: '', hora: '', valor: 15000, p1: 1000000, p2: 100000, p3: 100000 },
+    noche: { fecha: '', hora: '', valor: 15000, p1: 1000000, p2: 100000, p3: 100000 }
+};
+
+// =========================================================================
+// ENDPOINTS DE LA API (PANEL ADMINISTRATIVO)
+// =========================================================================
+
+// 1. Obtener todas las boletas de todos los sorteos
+app.get('/api/admin/boletas', (req, res) => {
+    res.json(baseDatosBoletas);
 });
 
-// Creación de la tabla si no existe
-db.run(`CREATE TABLE IF NOT EXISTS boletas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sorteo TEXT NOT NULL,
-    numero TEXT NOT NULL,
-    UNIQUE(sorteo, numero)
-)`);
+// 2. Obtener los parámetros de configuración de todos los sorteos
+app.get('/api/admin/configuraciones', (req, res) => {
+    res.json(baseDatosConfiguraciones);
+});
 
-const bot = TELEGRAM_BOT_TOKEN ? new Telegraf(TELEGRAM_BOT_TOKEN) : null;
+// 3. Crear dinámicamente un nuevo sorteo autónomo
+app.post('/api/admin/crear-sorteo', (req, res) => {
+    const { sorteo } = req.body;
+    if (!sorteo) return res.status(400).json({ error: "Falta el identificador del sorteo." });
 
-/**
- * Función auxiliar para calcular estadísticas globales 
- * y enviar un reporte consolidado al grupo de Telegram.
- */
-function enviarEstadisticas(mensajeInicial) {
-    if (!bot || !NOTIFICATIONS_CHAT_ID) return;
-    
-    db.all("SELECT sorteo, COUNT(*) as total FROM boletas GROUP BY sorteo", [], (err, rows) => {
-        if (err) return;
-        let totalDia = 0;
-        let totalNoche = 0;
-        
-        rows.forEach(row => {
-            if (row.sorteo === 'dia') totalDia = row.total;
-            if (row.sorteo === 'noche') totalNoche = row.total;
-        });
-        
-        const totalGlobal = totalDia + totalNoche;
-        
-        const mensajeCompleto = `${mensajeInicial}\n\n` +
-                                `📊 *Estadísticas de Ventas Actuales:*\n` +
-                                `☀️ Sorteo Día: *${totalDia}/100* vendidos\n` +
-                                `🌙 Sorteo Noche: *${totalNoche}/100* vendidos\n` +
-                                `📈 Total General: *${totalGlobal}/200* boletas`;
-                                
-        bot.telegram.sendMessage(NOTIFICATIONS_CHAT_ID, mensajeCompleto, { parse_mode: 'Markdown' });
-    });
-}
-
-// 👁️ ENDPOINT: Notificar visitas a la página en tiempo real
-app.post('/api/notificar-visita', (req, res) => {
-    if (bot && NOTIFICATIONS_CHAT_ID) {
-        bot.telegram.sendMessage(NOTIFICATIONS_CHAT_ID, "🌐 *¡Nuevo visitante!* Alguien acaba de entrar a la página web.", { parse_mode: 'Markdown' });
+    // Si el sorteo no existe en memoria, lo inicializamos de inmediato
+    if (!baseDatosBoletas[sorteo]) {
+        baseDatosBoletas[sorteo] = {};
+        baseDatosConfiguraciones[sorteo] = { 
+            fecha: '', 
+            hora: '', 
+            valor: 15000, 
+            p1: 0, 
+            p2: 0, 
+            p3: 0 
+        };
     }
-    res.json({ status: 'ok' });
+    res.status(200).json({ mensaje: `Sorteo '${sorteo}' dado de alta exitosamente.` });
 });
 
-// 🎯 ENDPOINT: Notificar cuando eligen números en la barra inferior (Debounce desde el cliente)
-app.post('/api/notificar-seleccion', (req, res) => {
-    const { numeros, sorteo } = req.body;
-    if (bot && NOTIFICATIONS_CHAT_ID && numeros && numeros.length > 0) {
-        const sorteoNombre = sorteo === 'dia' ? "☀️ DÍA" : "🌙 NOCHE";
-        bot.telegram.sendMessage(
-            NOTIFICATIONS_CHAT_ID, 
-            `👀 *Interés en Vivo:* Un usuario tiene seleccionados los números [ *${numeros.join(', ')}* ] para el sorteo de la *${sorteoNombre}*.`, 
-            { parse_mode: 'Markdown' }
-        );
+// 4. Configurar el valor de la boleta y el cierre automático
+app.post('/api/admin/configurar-cierre', (req, res) => {
+    const { sorteo, fecha, hora, valor } = req.body;
+    if (!sorteo || !baseDatosConfiguraciones[sorteo]) {
+        return res.status(400).json({ error: "Sorteo inexistente o no especificado." });
     }
-    res.json({ status: 'ok' });
+
+    baseDatosConfiguraciones[sorteo].fecha = fecha;
+    baseDatosConfiguraciones[sorteo].hora = hora;
+    baseDatosConfiguraciones[sorteo].valor = parseFloat(valor) || 0;
+
+    res.status(200).json({ mensaje: "Configuración de cierre y valor de boleta actualizados." });
 });
 
-// ENDPOINT: Consultar todos los números vendidos
-app.get('/api/vendidos', (req, res) => {
-    db.all("SELECT sorteo, numero FROM boletas", [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        const data = { dia: [], noche: [] };
-        rows.forEach(row => {
-            if (data[row.sorteo]) data[row.sorteo].push(row.numero);
-        });
-        res.json(data);
-    });
+// 5. Configurar el plan estructurado de premios
+app.post('/api/admin/configurar-premios', (req, res) => {
+    const { sorteo, p1, p2, p3 } = req.body;
+    if (!sorteo || !baseDatosConfiguraciones[sorteo]) {
+        return res.status(400).json({ error: "Sorteo inexistente o no especificado." });
+    }
+
+    baseDatosConfiguraciones[sorteo].p1 = parseFloat(p1) || 0;
+    baseDatosConfiguraciones[sorteo].p2 = parseFloat(p2) || 0;
+    baseDatosConfiguraciones[sorteo].p3 = parseFloat(p3) || 0;
+
+    res.status(200).json({ mensaje: "Plan de premios salvado con éxito." });
 });
 
-// ==========================================
-// LÓGICA DE COMANDOS DEL BOT (TELEGRAF)
-// ==========================================
-if (bot) {
-    // Middleware de seguridad para el administrador principal
-    bot.use((ctx, next) => {
-        if (ctx.from && ctx.from.id === ADMIN_TELEGRAM_ID) return next();
-        return ctx.reply("❌ No tienes autorización para usar este sistema administrativo.");
-    });
+// 6. Apartar un número específico (Estado: apartado)
+app.post('/api/admin/apartar', (req, res) => {
+    const { sorteo, numero, nombre, whatsapp } = req.body;
+    if (!sorteo || !numero || !nombre || !whatsapp) {
+        return res.status(400).json({ error: "Datos insuficientes para procesar el apartado." });
+    }
 
-    bot.start((ctx) => ctx.reply("🍀 Sistema de Rifas Activo.\n\nComandos públicos del Admin:\n/vender [dia/noche] [numero]\n/liberar [dia/noche] [numero]"));
+    if (!baseDatosBoletas[sorteo]) baseDatosBoletas[sorteo] = {};
 
-    // Comando para registrar una venta manual
-    bot.command('vender', (ctx) => {
-        const args = ctx.message.text.split(' ');
-        if (args.length !== 3) return ctx.reply("⚠️ Formato: /vender [dia/noche] [numero]");
+    // Guardar o sobreescribir la boleta
+    baseDatosBoletas[sorteo][numero] = {
+        nombre,
+        whatsapp,
+        estado: 'apartado',
+        fechaRegistro: new Date().toISOString()
+    };
 
-        const sorteo = args[1].toLowerCase();
-        let numero = args[2];
+    res.status(200).json({ mensaje: `Número ${numero} reservado.` });
+});
 
-        if (sorteo !== 'dia' && sorteo !== 'noche') return ctx.reply("❌ Sorteo incorrecto. Usa 'dia' o 'noche'.");
-        if (isNaN(numero) || numero.length > 2) return ctx.reply("❌ Número inválido. Debe ser de dos dígitos.");
-        
-        numero = numero.padStart(2, '0');
+// 7. Confirmar la compra de un número (Estado: pagado)
+app.post('/api/admin/confirmar-pago', (req, res) => {
+    const { sorteo, numero } = req.body;
+    if (!sorteo || !numero || !baseDatosBoletas[sorteo] || !baseDatosBoletas[sorteo][numero]) {
+        return res.status(404).json({ error: "La boleta no se encuentra registrada o apartada." });
+    }
 
-        db.run("INSERT INTO boletas (sorteo, numero) VALUES (?, ?)", [sorteo, numero], function(err) {
-            if (err) {
-                if (err.message.includes('UNIQUE')) return ctx.reply(`⚠️ El ${numero} ya está vendido en el sorteo de la ${sorteo}.`);
-                return ctx.reply("❌ Error al interactuar con la Base de Datos.");
-            }
-            ctx.reply(`✅ ¡Número ${numero} guardado con éxito! 💸`);
-            
-            const sorteoNombre = sorteo === 'dia' ? "☀️ DÍA" : "🌙 NOCHE";
-            enviarEstadisticas(`💰 *¡Número Vendido!* El administrador registró el número *${numero}* para el sorteo de la *${sorteoNombre}*.`);
-        });
-    });
+    baseDatosBoletas[sorteo][numero].estado = 'pagado';
+    res.status(200).json({ mensaje: `Pago confirmado para el número ${numero}.` });
+});
 
-    // Comando para liberar un número vendido
-    bot.command('liberar', (ctx) => {
-        const args = ctx.message.text.split(' ');
-        if (args.length !== 3) return ctx.reply("⚠️ Formato: /liberar [dia/noche] [numero]");
+// 8. Liberar un número (Remover el registro para volver a disponible)
+app.post('/api/admin/liberar', (req, res) => {
+    const { sorteo, numero } = req.body;
+    if (!sorteo || !numero || !baseDatosBoletas[sorteo]) {
+        return res.status(400).json({ error: "Parámetros inválidos." });
+    }
 
-        const sorteo = args[1].toLowerCase();
-        const numero = args[2].padStart(2, '0');
+    if (baseDatosBoletas[sorteo][numero]) {
+        delete baseDatosBoletas[sorteo][numero];
+    }
+    res.status(200).json({ mensaje: `Número ${numero} liberado correctamente.` });
+});
 
-        db.run("DELETE FROM boletas WHERE sorteo = ? AND numero = ?", [sorteo, numero], function(err) {
-            if (err) return ctx.reply("❌ Error al interactuar con la Base de Datos.");
-            if (this.changes === 0) return ctx.reply("⚠️ Ese número no se encuentra marcado como vendido.");
-            ctx.reply(`🔄 Número ${numero} liberado correctamente.`);
-            
-            const sorteoNombre = sorteo === 'dia' ? "☀️ DÍA" : "🌙 NOCHE";
-            enviarEstadisticas(`🔄 *Número Liberado:* El número *${numero}* del sorteo de la *${sorteoNombre}* vuelve a estar disponible.`);
-        });
-    });
+// 9. Healthcheck para el contenedor de Render
+app.get('/health', (req, res) => {
+    res.status(200).send('OK');
+});
 
-    bot.launch().then(() => console.log("Bot de Telegram vinculado con éxito."));
-}
+// Enrutar cualquier otra petición al index.html (Single Page App Fallback)
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
-// Iniciar el Servidor Web
+// Inicializar Servidor
 app.listen(PORT, () => {
-    console.log(`Servidor de API escuchando de forma segura en el puerto ${PORT}`);
+    console.log(`🚀 Servidor Administrativo Multi-Sorteo corriendo en el puerto ${PORT}`);
 });
