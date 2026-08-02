@@ -1,5 +1,5 @@
 const express = require('express');
-const sqlite3 = sqlite3 = require('sqlite3').verbose();
+const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 
 const app = express();
@@ -47,8 +47,6 @@ db.serialize(() => {
 // ==========================================
 // RUTAS PÚBLICAS Y DE CONSULTA
 // ==========================================
-
-// 1. Ruta clásica para compatibilidad (solo números)
 app.get('/api/vendidos', (req, res) => {
     const sorteo = req.query.sorteo || 'dia';
     db.all("SELECT numero FROM boletas WHERE sorteo = ?", [sorteo], (err, rows) => {
@@ -59,7 +57,6 @@ app.get('/api/vendidos', (req, res) => {
     });
 });
 
-// 2. NUEVA RUTA CLAVE: Devuelve todas las boletas con su estado y datos (para pintar colores y tablas)
 app.get('/api/admin/boletas', (req, res) => {
     const sorteo = req.query.sorteo;
     let query = "SELECT * FROM boletas";
@@ -90,7 +87,6 @@ app.get('/api/admin/configuraciones', (req, res) => {
     });
 });
 
-// Endpoint para apartar con nombre, teléfono y estado explícito
 app.post('/api/admin/apartar', (req, res) => {
     const { numeros, sorteo, estado, nombre, telefono } = req.body;
 
@@ -103,7 +99,6 @@ app.post('/api/admin/apartar', (req, res) => {
         return res.status(400).json({ error: "Faltan parámetros requeridos (numeros/sorteo)." });
     }
 
-    // Aseguramos que si no viene estado, por defecto guarde 'apartado' para que pinte el color correcto
     const estadoFinal = estado || 'apartado';
     const nombreComprador = nombre || '';
     const telefonoComprador = telefono || '';
