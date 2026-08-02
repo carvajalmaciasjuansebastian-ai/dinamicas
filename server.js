@@ -1,6 +1,5 @@
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
 const cors = require('cors');
 
 const app = express();
@@ -9,125 +8,101 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
 
-// Inicialización de SQLite
+// Conexión a la base de datos SQLite persistente (suerte_real.db)
 const db = new sqlite3.Database('./suerte_real.db', (err) => {
     if (err) {
-        console.error('Error al conectar con SQLite:', err.message);
+        console.error('Error al conectar con la base de datos SQLite:', err.message);
     } else {
-        console.log('Conectado exitosamente a la base de datos SQLite (suerte_real.db)');
+        console.log('Conectado a la base de datos SQLite de Suerte Real.');
     }
 });
 
-// Creación de la tabla boletas si no existe
+// Inicializar tablas si no existen
 db.serialize(() => {
-    db.run(`
-        CREATE TABLE IF NOT EXISTS boletas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sorteo TEXT NOT NULL,
-            numero TEXT NOT NULL,
-            nombre_cliente TEXT,
-            telefono_cliente TEXT,
-            estado TEXT DEFAULT 'apartado',
-            fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(sorteo, numero)
-        )
-    `);
-});
+    db.run(`CREATE TABLE IF NOT EXISTS boletas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero TEXT,
+        sorteo TEXT,
+        estado TEXT
+    )`);
 
-// ==========================================
-// 1. RUTA PÚBLICA (Para index.html)
-// ==========================================
-// Consulta solo los números ocupados (apartado o pagado) para el frontend del cliente
-app.get('/api/boletas', (req, res) => {
-    const { sorteo } = req.query;
+    db.run(`CREATE TABLE IF NOT EXISTS configuraciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        premio_mayor TEXT,
+        premio_invertido TEXT,
+        valor_boleta TEXT
+    )`);
 
-    if (!sorteo) {
-        return res.status(400).json({ error: 'El parámetro sorteo es requerido.' });
-    }
-
-    const sql = `SELECT numero FROM boletas WHERE sorteo = ? AND estado IN ('apartado', 'pagado')`;
-    
-    db.all(sql, [sorteo], (err, rows) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
+    // Insertar configuración por defecto si está vacía
+    db.get("SELECT COUNT(*) as count FROM configuraciones", [], (err, row) => {
+        if (row && row.count === 0) {
+            db.run(`INSERT INTO configuraciones (premio_mayor, premio_invertido, valor_boleta) VALUES ('$700', '$100', '$15')`);
         }
-        
-        const vendidos = rows.map(r => r.numero);
-        res.json({ vendidos });
     });
 });
 
 // ==========================================
-// 2. RUTAS ADMINISTRATIVAS (Para panel admin)
+// RUTAS PÚBLICAS (CLIENTE)
 // ==========================================
 
-// Obtener todas las boletas registradas para el panel de control
-app.get('/api/admin/boletas', (req, res) => {
-    const sql = `SELECT * FROM boletas ORDER BY fecha_registro DESC`;
-    db.all(sql, [], (err, rows) => {
+// Obtener números vendidos según el sorteo ('dia' o 'noche')
+app.get('/api/vendidos', (req, res) => {
+    const sorteo = req.query.sorteo || 'dia';
+    db.all("SELECT numero FROM boletas WHERE sorteo = ?", [sorteo], (err, rows) => {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
-        res.json({ boletas: rows });
+        // Retorna un array plano con los números vendidos/apartados (ej: ["05", "12"])
+        const numerosVendidos = rows.map(r => r.numero);
+        res.json(numerosVendidos);
     });
 });
 
-// Generar / Guardar un nuevo ticket desde el panel del administrador
-app.post('/api/admin/boletas', (req, res) => {
-    const { sorteo, numero, nombre_cliente, telefono_cliente, estado } = req.body;
+// ==========================================
+// RUTAS ADMINISTRATIVAS (PANEL ADMIN)
+// ==========================================
 
-    if (!sorteo || !numero) {
-        return res.status(400).json({ error: 'Sorteo y Número son requeridos.' });
-    }
-
-    const estadoFinal = estado || 'apartado';
-    const numFormateado = numero.toString().padStart(2, '0');
-
-    const sql = `
-        INSERT INTO boletas (sorteo, numero, nombre_cliente, telefono_cliente, estado)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(sorteo, numero) DO UPDATE SET
-            nombre_cliente = excluded.nombre_cliente,
-            telefono_cliente = excluded.telefono_cliente,
-            estado = excluded.estado,
-            fecha_registro = CURRENT_TIMESTAMP
-    `;
-
-    db.run(sql, [sorteo, numFormateado, nombre_cliente || '', telefono_cliente || '', estadoFinal], function(err) {
+// 1. Obtener configuraciones generales del sistema
+app.get('/api/admin/configuraciones', (req, res) => {
+    db.get("SELECT * FROM configuraciones LIMIT 1", [], (err, row) => {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
-        res.json({ 
-            success: true, 
-            message: 'Ticket registrado correctamente.',
-            id: this.lastID 
+        res.json(row || { premio_mayor: "$700", premio_invertido: "$100", valor_boleta: "$15" });
+    });
+});
+
+// 2. Apartar o registrar números desde el panel de administración
+app.post('/api/admin/apartar', (req, res) => {
+    const { numeros, sorteo, estado } = req.body; 
+
+    if (!numeros || !Array.isArray(numeros) || !sorteo) {
+        return res.status(400).json({ error: "Faltan parámetros requeridos o formato de números inválido" });
+    }
+
+    const estadoRegistro = estado || 'vendido';
+
+    db.serialize(() => {
+        db.run("BEGIN TRANSACTION");
+        const stmt = db.prepare(`INSERT OR REPLACE INTO boletas (numero, sorteo, estado) VALUES (?, ?, ?)`);
+
+        numeros.forEach(num => {
+            stmt.run(num.toString().padStart(2, '0'), sorteo, estadoRegistro);
         });
-    });
-});
 
-// Eliminar / Liberar un número desde el panel admin
-app.delete('/api/admin/boletas', (req, res) => {
-    const { sorteo, numero } = req.body;
-
-    if (!sorteo || !numero) {
-        return res.status(400).json({ error: 'Sorteo y Número son requeridos.' });
-    }
-
-    const numFormateado = numero.toString().padStart(2, '0');
-    const sql = `DELETE FROM boletas WHERE sorteo = ? AND numero = ?`;
-
-    db.run(sql, [sorteo, numFormateado], function(err) {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-        res.json({ success: true, message: 'Boleta liberada correctamente.' });
+        stmt.finalize((err) => {
+            if (err) {
+                db.run("ROLLBACK");
+                return res.status(500).json({ error: err.message });
+            }
+            db.run("COMMIT");
+            res.json({ success: true, message: "Números apartados/actualizados correctamente en el servidor" });
+        });
     });
 });
 
 // Iniciar servidor
 app.listen(PORT, () => {
-    console.log(`Servidor Suerte Real ejecutándose en http://localhost:${PORT}`);
+    console.log(`Servidor de Suerte Real corriendo en el puerto ${PORT}`);
 });
