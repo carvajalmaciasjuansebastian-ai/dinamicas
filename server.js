@@ -1,136 +1,123 @@
 const express = require('express');
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
 const cors = require('cors');
+
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Configuración de CORS y Middleware
-app.use(cors({
-    origin: '*', // O puedes poner la URL específica de tu Netlify si prefieres mayor seguridad
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type']
-}));
+// Middleware
+app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
-// --- BASE DE DATOS EN MEMORIA / ESTRUCTURA DE DATOS ---
-let infoBoletasCargadas = {
-    dia: {},
-    noche: {}
-};
+// Inicialización de la base de datos SQLite
+const db = new sqlite3.Database('./suerte_real.db', (err) => {
+    if (err) {
+        console.error('Error al conectar con SQLite:', err.message);
+    } else {
+        console.log('Conectado a la base de datos suerte_real.db');
+    }
+});
 
-let infoConfigSorteos = {
-    dia: { fecha: '2026-08-10', hora: '20:00', valor: 15000, p1: 1000000, p2: 100000, p3: 100000 },
-    noche: { fecha: '2026-08-10', hora: '22:00', valor: 15000, p1: 1000000, p2: 100000, p3: 100000 }
-};
+// Crear tabla de números vendidos si no existe
+db.run(`
+    CREATE TABLE IF NOT EXISTS vendidos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero TEXT NOT NULL,
+        sorteo TEXT NOT NULL,
+        UNIQUE(numero, sorteo)
+    )
+`);
 
 // ==========================================
-// 1. RUTAS PÚBLICAS (Para la página web de usuarios)
+// RUTAS PARA EL CLIENTE (INDEX.HTML)
 // ==========================================
-app.get('/api/publico/estado', (req, res) => {
-    res.json({
-        sorteosDisponibles: Object.keys(infoConfigSorteos),
-        configuraciones: infoConfigSorteos,
-        boletas: infoBoletasCargadas
+
+// Endpoint para consultar números vendidos (Sin Caché)
+app.get('/api/vendidos', (req, res) => {
+    // Encabezados para evitar que el cliente o navegador guarde datos viejos
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    const { sorteo } = req.query;
+
+    if (!sorteo) {
+        return res.status(400).json({ error: 'Debes especificar el sorteo (dia/noche)' });
+    }
+
+    db.all('SELECT numero FROM vendidos WHERE sorteo = ?', [sorteo], (err, rows) => {
+        if (err) {
+            console.error('Error al obtener vendidos:', err.message);
+            return res.status(500).json([]);
+        }
+        const numeros = rows.map(r => r.numero);
+        res.json(numeros);
     });
 });
 
 // ==========================================
-// 2. RUTAS DE ADMINISTRACIÓN (Para el Panel Admin)
+// RUTAS PARA EL ADMIN (PANEL DE CONTROL)
 // ==========================================
-app.get('/api/admin/boletas', (req, res) => {
-    res.json(infoBoletasCargadas);
-});
 
-app.get('/api/admin/configuraciones', (req, res) => {
-    res.json(infoConfigSorteos);
-});
+// Marcar un número como vendido
+app.post('/api/admin/vender', (req, res) => {
+    const { numero, sorteo } = req.body;
 
-// Crear un nuevo sorteo
-app.post('/api/admin/crear-sorteo', (req, res) => {
-    const { sorteo } = req.body;
-    if (!sorteo) return res.status(400).json({ error: 'Nombre de sorteo inválido' });
-
-    const nombreLimpio = sorteo.toLowerCase().replace(/[^a-z0-9]/g, "_");
-    
-    if (!infoBoletasCargadas[nombreLimpio]) {
-        infoBoletasCargadas[nombreLimpio] = {};
-    }
-    if (!infoConfigSorteos[nombreLimpio]) {
-        infoConfigSorteos[nombreLimpio] = { fecha: '', hora: '', valor: 15000, p1: 0, p2: 0, p3: 0 };
+    if (!numero || !sorteo) {
+        return res.status(400).json({ error: 'Faltan parámetros (numero, sorteo)' });
     }
 
-    res.json({ ok: true, sorteos: Object.keys(infoConfigSorteos) });
+    db.run('INSERT OR IGNORE INTO vendidos (numero, sorteo) VALUES (?, ?)', [numero, sorteo], function(err) {
+        if (err) {
+            console.error('Error al vender número:', err.message);
+            return res.status(500).json({ success: false, error: err.message });
+        }
+        res.json({ success: true, message: `Número ${numero} marcado como vendido en sorteo ${sorteo}` });
+    });
 });
 
-// Apartar un número
-app.post('/api/admin/apartar', (req, res) => {
-    const { sorteo, numero, nombre, whatsapp } = req.body;
-    if (!infoBoletasCargadas[sorteo]) infoBoletasCargadas[sorteo] = {};
-
-    infoBoletasCargadas[sorteo][numero] = {
-        nombre: nombre,
-        whatsapp: whatsapp,
-        estado: 'apartado',
-        fechaRegistro: new Date().toISOString()
-    };
-
-    res.json({ ok: true });
-});
-
-// Confirmar pago de un número
-app.post('/api/admin/confirmar-pago', (req, res) => {
-    const { sorteo, numero } = req.body;
-    if (infoBoletasCargadas[sorteo] && infoBoletasCargadas[sorteo][numero]) {
-        infoBoletasCargadas[sorteo][numero].estado = 'pagado';
-        return res.json({ ok: true });
-    }
-    res.status(404).json({ error: 'Boleta no encontrada' });
-});
-
-// Liberar / Devolver número
+// Liberar/Desmarcar un número
 app.post('/api/admin/liberar', (req, res) => {
-    const { sorteo, numero } = req.body;
-    if (infoBoletasCargadas[sorteo] && infoBoletasCargadas[sorteo][numero]) {
-        delete infoBoletasCargadas[sorteo][numero];
-        return res.json({ ok: true });
+    const { numero, sorteo } = req.body;
+
+    if (!numero || !sorteo) {
+        return res.status(400).json({ error: 'Faltan parámetros (numero, sorteo)' });
     }
-    res.status(404).json({ error: 'Boleta no encontrada' });
+
+    db.run('DELETE FROM vendidos WHERE numero = ? AND sorteo = ?', [numero, sorteo], function(err) {
+        if (err) {
+            console.error('Error al liberar número:', err.message);
+            return res.status(500).json({ success: false, error: err.message });
+        }
+        res.json({ success: true, message: `Número ${numero} liberado en sorteo ${sorteo}` });
+    });
 });
 
-// Configurar fecha, hora y valor de boleta
-app.post('/api/admin/configurar-cierre', (req, res) => {
-    const { sorteo, fecha, hora, valor } = req.body;
-    if (!infoConfigSorteos[sorteo]) {
-        infoConfigSorteos[sorteo] = {};
+// Reiniciar sorteo (Liberar todos los números de 'dia' o 'noche')
+app.post('/api/admin/reiniciar', (req, res) => {
+    const { sorteo } = req.body;
+
+    if (!sorteo) {
+        return res.status(400).json({ error: 'Debes indicar el sorteo a reiniciar' });
     }
-    infoConfigSorteos[sorteo].fecha = fecha;
-    infoConfigSorteos[sorteo].hora = hora;
-    infoConfigSorteos[sorteo].valor = valor;
 
-    res.json({ ok: true });
+    db.run('DELETE FROM vendidos WHERE sorteo = ?', [sorteo], function(err) {
+        if (err) {
+            console.error('Error al reiniciar sorteo:', err.message);
+            return res.status(500).json({ success: false, error: err.message });
+        }
+        res.json({ success: true, message: `Sorteo ${sorteo} limpiado por completo.` });
+    });
 });
 
-// Configurar plan de premios
-app.post('/api/admin/configurar-premios', (req, res) => {
-    const { sorteo, p1, p2, p3 } = req.body;
-    if (!infoConfigSorteos[sorteo]) {
-        infoConfigSorteos[sorteo] = {};
-    }
-    infoConfigSorteos[sorteo].p1 = p1;
-    infoConfigSorteos[sorteo].p2 = p2;
-    infoConfigSorteos[sorteo].p3 = p3;
-
-    res.json({ ok: true });
+// Servir la aplicación principal
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Ruta de prueba raíz
-app.get('/', (req, res) => {
-    res.send('API Backend de Suerte Real funcionando correctamente 🚀');
-});
-
-// ==========================================
-// 3. INICIO DEL SERVIDOR (CRÍTICO PARA RENDER)
-// ==========================================
-const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Servidor Profesional Multi-Sorteo corriendo en el puerto ${PORT}`);
+// Iniciar servidor
+app.listen(PORT, () => {
+    console.log(`Servidor de Suerte Real corriendo en el puerto ${PORT}`);
 });
