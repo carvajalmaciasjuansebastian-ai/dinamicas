@@ -1,6 +1,7 @@
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,12 +10,16 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Conexión y creación de la Base de Datos SQLite (Persistente en archivo)
-const db = new sqlite3.Database('./suerte_real.db', (err) => {
+// Configuración de la Base de Datos con Disco Persistente en Render (/data)
+const dbPath = process.env.NODE_ENV === 'production' 
+    ? path.join('/data', 'suerte_real.db') 
+    : './suerte_real.db';
+
+const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error('Error al abrir la base de datos:', err.message);
     } else {
-        console.log('Conectado a la base de datos SQLite: suerte_real.db');
+        console.log(`Conectado a la base de datos SQLite en: ${dbPath}`);
         inicializarBaseDeDatos();
     }
 });
