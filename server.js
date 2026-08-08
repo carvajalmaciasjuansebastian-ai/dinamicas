@@ -14,6 +14,30 @@ app.use(express.json());
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
+// ================= FUNCIÓN PARA TELEGRAM =================
+async function enviarNotificacionTelegram(mensaje) {
+    if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
+        console.log("Faltan credenciales de Telegram en variables de entorno");
+        return;
+    }
+    try {
+        const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                text: mensaje,
+                parse_mode: 'HTML'
+            })
+        });
+        const data = await response.json();
+        console.log("Respuesta de Telegram:", data);
+    } catch (error) {
+        console.error('Error enviando a Telegram:', error);
+    }
+}
+
 // Configuración de la Base de Datos con Disco Persistente en Render (/data)
 const dbPath = process.env.NODE_ENV === 'production' 
     ? path.join('/data', 'suerte_real.db') 
@@ -59,30 +83,6 @@ function inicializarBaseDeDatos() {
             });
         });
     });
-}
-
-// ================= FUNCIÓN PARA TELEGRAM =================
-async function enviarNotificacionTelegram(mensaje) {
-    if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
-        console.log("Faltan credenciales de Telegram en variables de entorno");
-        return;
-    }
-    try {
-        const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: TELEGRAM_CHAT_ID,
-                text: mensaje,
-                parse_mode: 'HTML'
-            })
-        });
-        const data = await response.json();
-        console.log("Respuesta de Telegram:", data);
-    } catch (error) {
-        console.error('Error enviando a Telegram:', error);
-    }
 }
 
 // ================= RUTAS DE LA API =================
@@ -201,11 +201,11 @@ app.delete('/api/boletas/:sorteo/:numero', (req, res) => {
     });
 });
 
-// ================= RUTAS DE PRUEBA TELEGRAM =================
+// 8. Notificar cada vez que alguien entra a la página web
 app.all('/api/notificar-visita', async (req, res) => {
-    const mensaje = `🔥 <b>¡Prueba de notificación exitosa en la web!</b>`;
+    const mensaje = `👀 <b>¡Alguien acaba de entrar a la página web!</b>`;
     await enviarNotificacionTelegram(mensaje);
-    res.json({ success: true, message: "Notificación de prueba enviada" });
+    res.json({ success: true, message: "Visita notificada" });
 });
 
 // Iniciar servidor
