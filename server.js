@@ -201,11 +201,28 @@ app.delete('/api/boletas/:sorteo/:numero', (req, res) => {
     });
 });
 
-// 8. Notificar cada vez que alguien entra a la página web
-app.all('/api/notificar-visita', async (req, res) => {
-    const mensaje = `👀 <b>¡Alguien acaba de entrar a la página web!</b>`;
+// 8. Notificar cada vez que alguien entra a la página web (con IP y Ciudad)
+app.post('/api/notificar-visita', async (req, res) => {
+    const { ip, ciudad, pais } = req.body;
+    const mensaje = `👁️ <b>¡Alguien acaba de entrar a la página web!</b>\n📍 Ciudad: ${ciudad || 'Desconocida'}\n🌐 IP: ${ip || 'Desconocida'}`;
     await enviarNotificacionTelegram(mensaje);
     res.json({ success: true, message: "Visita notificada" });
+});
+
+// 9. Notificar cuando un aventurero empieza a seleccionar un número (con IP y Ciudad)
+app.post('/api/notificar-seleccion', async (req, res) => {
+    const { numero, ip, ciudad } = req.body;
+    const mensaje = `🍀 <b>¡Un aventurero está seleccionando números!</b>\n🔢 Primer número tocado: ${numero}\n📍 Ciudad: ${ciudad || 'Desconocida'}\n🌐 IP: ${ip || 'Desconocida'}`;
+    await enviarNotificacionTelegram(mensaje);
+    res.json({ success: true, message: "Selección notificada" });
+});
+
+// 10. Notificar cuando un aventurero le da clic en comprar/jugar (con IP y Ciudad)
+app.post('/api/notificar-pedido', async (req, res) => {
+    const { sorteo, numeros, total, ip, ciudad } = req.body;
+    const mensaje = `🛒 <b>¡Intento de compra (Jugar Números)!</b>\n🎟️ Sorteo: ${sorteo}\n🔢 Números: ${numeros}\n📦 Cantidad: ${total}\n📍 Ciudad: ${ciudad || 'Desconocida'}\n🌐 IP: ${ip || 'Desconocida'}`;
+    await enviarNotificacionTelegram(mensaje);
+    res.json({ success: true, message: "Pedido notificado" });
 });
 
 // Iniciar servidor
