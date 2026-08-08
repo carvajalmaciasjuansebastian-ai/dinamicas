@@ -63,14 +63,26 @@ function inicializarBaseDeDatos() {
 
 // ================= FUNCIÓN PARA TELEGRAM =================
 async function enviarNotificacionTelegram(mensaje) {
-    if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) return;
+    if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
+        console.log("Faltan credenciales de Telegram en variables de entorno");
+        return;
+    }
     try {
-        await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+        const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+        const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: mensaje, parse_mode: 'HTML' })
+            body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                text: mensaje,
+                parse_mode: 'HTML'
+            })
         });
-    } catch (error) { console.error('Error Telegram:', error); }
+        const data = await response.json();
+        console.log("Respuesta de Telegram:", data);
+    } catch (error) {
+        console.error('Error enviando a Telegram:', error);
+    }
 }
 
 // ================= RUTAS DE LA API =================
@@ -79,9 +91,17 @@ async function enviarNotificacionTelegram(mensaje) {
 app.get('/api/config', (req, res) => {
     db.all(`SELECT * FROM sorteos`, [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
+        
         const configs = {};
         rows.forEach(row => {
-            configs[row.nombre] = { fecha: row.fecha, hora: row.hora, valor: row.valor, p1: row.p1, p2: row.p2, p3: row.p3 };
+            configs[row.nombre] = {
+                fecha: row.fecha,
+                hora: row.hora,
+                valor: row.valor,
+                p1: row.p1,
+                p2: row.p2,
+                p3: row.p3
+            };
         });
         res.json(configs);
     });
@@ -90,8 +110,16 @@ app.get('/api/config', (req, res) => {
 // 2. Guardar o actualizar configuración / premios de un sorteo
 app.post('/api/config', (req, res) => {
     const { nombre, fecha, hora, valor, p1, p2, p3 } = req.body;
-    db.run(`INSERT INTO sorteos (nombre, fecha, hora, valor, p1, p2, p3) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(nombre) DO UPDATE SET fecha=coalesce(?, fecha), hora=coalesce(?, hora), valor=coalesce(?, valor), p1=coalesce(?, p1), p2=coalesce(?, p2), p3=coalesce(?, p3)`,
+    
+    db.run(`INSERT INTO sorteos (nombre, fecha, hora, valor, p1, p2, p3) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(nombre) DO UPDATE SET 
+            fecha=coalesce(?, fecha), 
+            hora=coalesce(?, hora), 
+            valor=coalesce(?, valor), 
+            p1=coalesce(?, p1), 
+            p2=coalesce(?, p2), 
+            p3=coalesce(?, p3)`,
         [nombre, fecha, hora, valor, p1, p2, p3, fecha, hora, valor, p1, p2, p3],
         function(err) {
             if (err) return res.status(500).json({ error: err.message });
@@ -104,6 +132,7 @@ app.post('/api/config', (req, res) => {
 app.post('/api/sorteos/crear', (req, res) => {
     const { nombre } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre de sorteo requerido' });
+
     db.run(`INSERT OR IGNORE INTO sorteos (nombre, fecha, hora, valor, p1, p2, p3) VALUES (?, '', '', 15000, 0, 0, 0)`, [nombre], function(err) {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true, message: 'Sorteo creado con éxito' });
@@ -127,25 +156,38 @@ app.get('/api/boletas/:sorteo', (req, res) => {
     const { sorteo } = req.params;
     db.all(`SELECT numero, nombre, whatsapp, estado FROM boletas WHERE sorteo = ?`, [sorteo], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
+
         const boletasObj = {};
-        rows.forEach(row => { boletasObj[row.numero] = { nombre: row.nombre, whatsapp: row.whatsapp, estado: row.estado }; });
+        rows.forEach(row => {
+            boletasObj[row.numero] = {
+                nombre: row.nombre,
+                whatsapp: row.whatsapp,
+                estado: row.estado
+            };
+        });
         res.json(boletasObj);
     });
 });
 
-// 6. Apartar o Confirmar Pago (Incluye Notificación)
+// 6. Apartar o Confirmar Pago de un número (Upsert + Notificación)
 app.post('/api/boletas', (req, res) => {
     const { sorteo, numero, nombre, whatsapp, estado } = req.body;
-    db.run(`INSERT INTO boletas (sorteo, numero, nombre, whatsapp, estado) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(sorteo, numero) DO UPDATE SET nombre = ?, whatsapp = ?, estado = ?`,
+
+    db.run(`INSERT INTO boletas (sorteo, numero, nombre, whatsapp, estado) 
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(sorteo, numero) DO UPDATE SET 
+            nombre = ?, whatsapp = ?, estado = ?`,
         [sorteo, numero, nombre, whatsapp, estado, nombre, whatsapp, estado],
         async function(err) {
             if (err) return res.status(500).json({ error: err.message });
-            // Notificar a Telegram
+            
+            // Notificar a Telegram cuando aparten o confirmen
             if (estado === 'apartado' || estado === 'confirmado') {
-                await enviarNotificacionTelegram(`🎯 <b>Nuevo movimiento</b>\n👤 ${nombre}\n🎲 Sorteo: ${sorteo}\n🔢 Número: ${numero}\n📌 Estado: ${estado}`);
+                const mensaje = `🎯 <b>¡Nuevo movimiento en boletas!</b>\n\n🎲 Sorteo: <b>${sorteo}</b>\n🔢 Número: <b>${numero}</b>\n👤 Cliente: ${nombre}\n📱 WhatsApp: ${whatsapp}\n📌 Estado: <b>${estado.toUpperCase()}</b>`;
+                await enviarNotificacionTelegram(mensaje);
             }
-            res.json({ success: true, message: 'Boleta actualizada' });
+
+            res.json({ success: true, message: 'Boleta actualizada en la base de datos' });
         }
     );
 });
@@ -157,6 +199,13 @@ app.delete('/api/boletas/:sorteo/:numero', (req, res) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true, message: 'Número liberado' });
     });
+});
+
+// ================= RUTAS DE PRUEBA TELEGRAM =================
+app.all('/api/notificar-visita', async (req, res) => {
+    const mensaje = `🔥 <b>¡Prueba de notificación exitosa en la web!</b>`;
+    await enviarNotificacionTelegram(mensaje);
+    res.json({ success: true, message: "Notificación de prueba enviada" });
 });
 
 // Iniciar servidor
