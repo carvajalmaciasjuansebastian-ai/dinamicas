@@ -61,12 +61,15 @@ function inicializarBaseDeDatos() {
     });
 }
 
-// ================= FUNCIÓN AUXILIAR PARA TELEGRAM =================
+// ================= FUNCIÓN AUXILIAR PARA TELEGRAM (CON DEPUGRACIÓN) =================
 async function enviarNotificacionTelegram(mensaje) {
-    if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) return;
+    if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
+        console.log("Faltan credenciales de Telegram en variables de entorno");
+        return;
+    }
     try {
         const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
-        await fetch(url, {
+        const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -75,6 +78,8 @@ async function enviarNotificacionTelegram(mensaje) {
                 parse_mode: 'HTML'
             })
         });
+        const data = await response.json();
+        console.log("Respuesta de Telegram:", data);
     } catch (error) {
         console.error('Error enviando a Telegram:', error);
     }
@@ -189,7 +194,7 @@ app.delete('/api/boletas/:sorteo/:numero', (req, res) => {
     });
 });
 
-// ================= 8. NUEVAS RUTAS DE NOTIFICACIONES TELEGRAM =================
+// ================= 8. RUTAS DE NOTIFICACIONES TELEGRAM =================
 
 // Notificación de Visita (con IP y Ciudad)
 app.post('/api/notificar-visita', async (req, res) => {
