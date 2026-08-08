@@ -6,6 +6,10 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Configuración de Credenciales de Telegram desde las Variables de Entorno de Render
+const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -55,6 +59,25 @@ function inicializarBaseDeDatos() {
             });
         });
     });
+}
+
+// ================= FUNCIÓN AUXILIAR PARA TELEGRAM =================
+async function enviarNotificacionTelegram(mensaje) {
+    if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) return;
+    try {
+        const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+        await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                text: mensaje,
+                parse_mode: 'HTML'
+            })
+        });
+    } catch (error) {
+        console.error('Error enviando a Telegram:', error);
+    }
 }
 
 // ================= RUTAS DE LA API =================
@@ -164,6 +187,33 @@ app.delete('/api/boletas/:sorteo/:numero', (req, res) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true, message: 'Número liberado' });
     });
+});
+
+// ================= 8. NUEVAS RUTAS DE NOTIFICACIONES TELEGRAM =================
+
+// Notificación de Visita (con IP y Ciudad)
+app.post('/api/notificar-visita', async (req, res) => {
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'IP desconocida';
+    let ubicacion = "Ciudad desconocida";
+    try {
+        const ipLimpia = ip.split(',')[0].trim();
+        const geoRes = await fetch(`http://ip-api.com/json/${ipLimpia}?fields=city,country`);
+        const geoData = await geoRes.json();
+        if (geoData.city) ubicacion = `${geoData.city}, ${geoData.country}`;
+    } catch (e) {}
+
+    const mensaje = `🔥 <b>¡Un aventurero de la suerte está visitando la página!</b>\n\n🌍 Ciudad/País: <b>${ubicacion}</b>\n💻 IP: <code>${ip}</code>`;
+    await enviarNotificacionTelegram(mensaje);
+    res.json({ success: true });
+});
+
+// Notificación cuando seleccionan números y piden por WhatsApp
+app.post('/api/notificar-pedido', async (req, res) => {
+    const { numeros, sorteo, nombre, whatsapp } = req.body;
+    const numerosStr = Array.isArray(numeros) ? numeros.join(', ') : (numeros || 'N/A');
+    const mensaje = `🎯 <b>¡Nuevos números solicitados al WhatsApp!</b>\n\n🎲 Sorteo: <b>${sorteo || 'General'}</b>\n🔢 Números: <b>${numerosStr}</b>\n👤 Cliente: ${nombre || 'No registrado'}\n📱 Celular: ${whatsapp || 'N/A'}`;
+    await enviarNotificacionTelegram(mensaje);
+    res.json({ success: true });
 });
 
 // Iniciar servidor
