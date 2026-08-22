@@ -87,6 +87,18 @@ function inicializarBaseDeDatos() {
 
 // ================= RUTAS DE LA API =================
 
+// 0. Redirección Limpia para Unirse al Grupo de WhatsApp (Evita caídas de Pauta Meta)
+app.get('/unirse-grupo', async (req, res) => {
+    const LINK_GRUPO = "https://chat.whatsapp.com/C5PUsCM3IuTFtFKNZaDwUF";
+    
+    // Notificar a Telegram que alguien presionó el botón de la pauta
+    const mensaje = `☘️ <b>¡Alguien hizo clic para unirse al Grupo VIP!</b>\n🔄 Redirigiendo de forma limpia a WhatsApp...`;
+    enviarNotificacionTelegram(mensaje).catch(err => console.error(err));
+
+    // Redirección 302 hacia WhatsApp eliminando parámetros basura de Meta
+    return res.redirect(302, LINK_GRUPO);
+});
+
 // 1. Obtener todas las configuraciones de los sorteos
 app.get('/api/config', (req, res) => {
     db.all(`SELECT * FROM sorteos`, [], (err, rows) => {
