@@ -87,15 +87,17 @@ function inicializarBaseDeDatos() {
 
 // ================= RUTAS DE LA API =================
 
-// 0. Redirección Limpia para Unirse al Grupo de WhatsApp (Evita caídas de Pauta Meta)
-app.get('/unirse-grupo', async (req, res) => {
+// 0. Redirección Limpia e Instantánea para Unirse al Grupo de WhatsApp (Fix 502)
+app.get('/unirse-grupo', (req, res) => {
     const LINK_GRUPO = "https://chat.whatsapp.com/C5PUsCM3IuTFtFKNZaDwUF";
     
-    // Notificar a Telegram que alguien presionó el botón de la pauta
-    const mensaje = `☘️ <b>¡Alguien hizo clic para unirse al Grupo VIP!</b>\n🔄 Redirigiendo de forma limpia a WhatsApp...`;
-    enviarNotificacionTelegram(mensaje).catch(err => console.error(err));
+    // Notificación asíncrona en segundo plano para evitar bloquear Render
+    if (TELEGRAM_TOKEN && TELEGRAM_CHAT_ID) {
+        const mensaje = `☘️ <b>¡Alguien hizo clic para unirse al Grupo VIP!</b>\n🔄 Redirigiendo a WhatsApp...`;
+        enviarNotificacionTelegram(mensaje).catch(err => console.error("Error Telegram:", err.message));
+    }
 
-    // Redirección 302 hacia WhatsApp eliminando parámetros basura de Meta
+    // Redirección 302 limpia e inmediata
     return res.redirect(302, LINK_GRUPO);
 });
 
