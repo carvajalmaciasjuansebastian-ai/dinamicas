@@ -89,7 +89,7 @@ function inicializarBaseDeDatos() {
 
 // 0. Redirección Limpia e Instantánea para Unirse al Grupo de WhatsApp (Fix 502)
 app.get('/unirse-grupo', (req, res) => {
-    const LINK_GRUPO = "https://chat.whatsapp.com/C5PUsCM3IuTFtFKNZaDwUF";
+    const LINK_GRUPO = "https://chat.whatsapp.com/Jz2sq1MNOnnK6zyRakKZt1?s=cl&p=a&mlu=4";
     
     // Notificación asíncrona en segundo plano para evitar bloquear Render
     if (TELEGRAM_TOKEN && TELEGRAM_CHAT_ID) {
