@@ -130,6 +130,9 @@ function inicializarBaseDeDatos() {
     });
 }
 
+// ================= MEMORIA PARA ORDEN DE SORTEOS =================
+let ordenSorteosGlobal = [];[cite: 4]
+
 // ================= RUTAS DE LA API =================
 
 // Endpoint para subir comprobantes (guarda la imagen y programa borrado a las 24h)
@@ -166,6 +169,21 @@ app.get('/unirse-grupo', (req, res) => {
 
     return res.redirect(302, LINK_GRUPO);
 });
+
+// NUEVO: Guardar orden personalizado de pestañas[cite: 4]
+app.post('/api/orden-sorteos', (req, res) => {[cite: 4]
+    if (req.body && req.body.orden) {[cite: 4]
+        ordenSorteosGlobal = req.body.orden;[cite: 4]
+        res.json({ success: true });[cite: 4]
+    } else {[cite: 4]
+        res.status(400).json({ error: 'Formato inválido' });[cite: 4]
+    }[cite: 4]
+});[cite: 4]
+
+// NUEVO: Obtener orden personalizado de pestañas[cite: 4]
+app.get('/api/orden-sorteos', (req, res) => {[cite: 4]
+    res.json({ orden: ordenSorteosGlobal });[cite: 4]
+});[cite: 4]
 
 // 1. Obtener todas las configuraciones de los sorteos
 app.get('/api/config', (req, res) => {
