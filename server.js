@@ -1,5 +1,5 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
+const sqlite3 = sqlite3.verbose();
 const cors = require('cors');
 const path = require('path');
 const multer = require('multer');
@@ -131,7 +131,7 @@ function inicializarBaseDeDatos() {
 }
 
 // ================= MEMORIA PARA ORDEN DE SORTEOS =================
-let ordenSorteosGlobal = [];[cite: 4]
+let ordenSorteosGlobal = [];
 
 // ================= RUTAS DE LA API =================
 
@@ -144,7 +144,6 @@ app.post('/api/upload-comprobante', upload.single('comprobante'), (req, res) => 
     const filePath = req.file.path;
     const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
     
-    // Programar eliminación en 24 horas (86,400,000 ms)
     setTimeout(() => {
         fs.unlink(filePath, (err) => {
             if (err) console.error(`Error al eliminar comprobante ${req.file.filename}:`, err);
@@ -170,20 +169,20 @@ app.get('/unirse-grupo', (req, res) => {
     return res.redirect(302, LINK_GRUPO);
 });
 
-// NUEVO: Guardar orden personalizado de pestañas[cite: 4]
-app.post('/api/orden-sorteos', (req, res) => {[cite: 4]
-    if (req.body && req.body.orden) {[cite: 4]
-        ordenSorteosGlobal = req.body.orden;[cite: 4]
-        res.json({ success: true });[cite: 4]
-    } else {[cite: 4]
-        res.status(400).json({ error: 'Formato inválido' });[cite: 4]
-    }[cite: 4]
-});[cite: 4]
+// Guardar orden personalizado de pestañas
+app.post('/api/orden-sorteos', (req, res) => {
+    if (req.body && req.body.orden) {
+        ordenSorteosGlobal = req.body.orden;
+        res.json({ success: true });
+    } else {
+        res.status(400).json({ error: 'Formato inválido' });
+    }
+});
 
-// NUEVO: Obtener orden personalizado de pestañas[cite: 4]
-app.get('/api/orden-sorteos', (req, res) => {[cite: 4]
-    res.json({ orden: ordenSorteosGlobal });[cite: 4]
-});[cite: 4]
+// Obtener orden personalizado de pestañas
+app.get('/api/orden-sorteos', (req, res) => {
+    res.json({ orden: ordenSorteosGlobal });
+});
 
 // 1. Obtener todas las configuraciones de los sorteos
 app.get('/api/config', (req, res) => {
