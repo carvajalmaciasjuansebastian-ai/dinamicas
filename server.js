@@ -190,7 +190,7 @@ app.get('/api/orden-sorteos', (req, res) => {
     res.json({ orden: ordenSorteosGlobal });
 });
 
-// NUEVO: Subir o actualizar el flyer de un sorteo específico
+// Subir o actualizar el flyer de un sorteo específico
 app.post('/api/sorteos/flyer', upload.single('flyer'), (req, res) => {
     const { nombre } = req.body;
     if (!req.file || !nombre) {
@@ -201,6 +201,30 @@ app.post('/api/sorteos/flyer', upload.single('flyer'), (req, res) => {
     db.run(`UPDATE sorteos SET flyer = ? WHERE nombre = ?`, [fileUrl, nombre], function(err) {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true, url: fileUrl });
+    });
+});
+
+// NUEVO: Eliminar el flyer / imagen de un sorteo específico
+app.delete('/api/sorteos/flyer/:nombre', (req, res) => {
+    const { nombre } = req.params;
+
+    db.get(`SELECT flyer FROM sorteos WHERE nombre = ?`, [nombre], (err, row) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!row) return res.status(404).json({ error: 'Sorteo no encontrado' });
+
+        if (row.flyer) {
+            const filename = path.basename(row.flyer);
+            const filePath = path.join(uploadsDir, filename);
+
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+            }
+        }
+
+        db.run(`UPDATE sorteos SET flyer = NULL WHERE nombre = ?`, [nombre], function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, message: 'Flyer eliminado correctamente' });
+        });
     });
 });
 
