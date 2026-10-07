@@ -100,7 +100,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
     }
 });
 
-// Crear tablas si no existen
+// Crear tablas si no existen (Actualizado para soportar 'flyer')
 function inicializarBaseDeDatos() {
     db.serialize(() => {
         db.run(`CREATE TABLE IF NOT EXISTS sorteos (
@@ -110,8 +110,14 @@ function inicializarBaseDeDatos() {
             valor REAL,
             p1 REAL,
             p2 REAL,
-            p3 REAL
-        )`);
+            p3 REAL,
+            flyer TEXT
+        )`, (err) => {
+            if (!err) {
+                // Migración por si la tabla ya existía sin la columna flyer
+                db.run(`ALTER TABLE sorteos ADD COLUMN flyer TEXT`, () => {});
+            }
+        });
 
         db.run(`CREATE TABLE IF NOT EXISTS boletas (
             sorteo TEXT,
@@ -184,6 +190,20 @@ app.get('/api/orden-sorteos', (req, res) => {
     res.json({ orden: ordenSorteosGlobal });
 });
 
+// NUEVO: Subir o actualizar el flyer de un sorteo específico
+app.post('/api/sorteos/flyer', upload.single('flyer'), (req, res) => {
+    const { nombre } = req.body;
+    if (!req.file || !nombre) {
+        return res.status(400).json({ error: 'Faltan datos o imagen' });
+    }
+    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+
+    db.run(`UPDATE sorteos SET flyer = ? WHERE nombre = ?`, [fileUrl, nombre], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true, url: fileUrl });
+    });
+});
+
 // 1. Obtener todas las configuraciones de los sorteos
 app.get('/api/config', (req, res) => {
     db.all(`SELECT * FROM sorteos`, [], (err, rows) => {
@@ -197,7 +217,8 @@ app.get('/api/config', (req, res) => {
                 valor: row.valor,
                 p1: row.p1,
                 p2: row.p2,
-                p3: row.p3
+                p3: row.p3,
+                flyer: row.flyer
             };
         });
         res.json(configs);
