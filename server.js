@@ -100,7 +100,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
     }
 });
 
-// Crear tablas si no existen (Actualizado para soportar 'flyer', 'vendedor' y 'excedente')
+// Crear tablas si no existen (Añadido soporte para vendedor y excedente de forma segura)
 function inicializarBaseDeDatos() {
     db.serialize(() => {
         db.run(`CREATE TABLE IF NOT EXISTS sorteos (
@@ -146,7 +146,6 @@ let ordenSorteosGlobal = [];
 
 // ================= RUTAS DE LA API =================
 
-// Endpoint para subir comprobantes (guarda la imagen y programa borrado a las 24h)
 app.post('/api/upload-comprobante', upload.single('comprobante'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No se ha adjuntado ninguna imagen' });
@@ -168,7 +167,6 @@ app.post('/api/upload-comprobante', upload.single('comprobante'), (req, res) => 
     });
 });
 
-// 0. Redirección para Grupo de WhatsApp
 app.get('/unirse-grupo', (req, res) => {
     const LINK_GRUPO = "https://chat.whatsapp.com/CF7FdHHK7NyHQrtI0AUbIv?s=sh&p=a&mlu=4&ilr=4";
     
@@ -180,7 +178,6 @@ app.get('/unirse-grupo', (req, res) => {
     return res.redirect(302, LINK_GRUPO);
 });
 
-// Guardar orden personalizado de pestañas
 app.post('/api/orden-sorteos', (req, res) => {
     if (req.body && req.body.orden) {
         ordenSorteosGlobal = req.body.orden;
@@ -190,12 +187,10 @@ app.post('/api/orden-sorteos', (req, res) => {
     }
 });
 
-// Obtener orden personalizado de pestañas
 app.get('/api/orden-sorteos', (req, res) => {
     res.json({ orden: ordenSorteosGlobal });
 });
 
-// Subir o actualizar el flyer de un sorteo específico
 app.post('/api/sorteos/flyer', upload.single('flyer'), (req, res) => {
     const { nombre } = req.body;
     if (!req.file || !nombre) {
@@ -209,7 +204,6 @@ app.post('/api/sorteos/flyer', upload.single('flyer'), (req, res) => {
     });
 });
 
-// NUEVO: Eliminar el flyer / imagen de un sorteo específico
 app.delete('/api/sorteos/flyer/:nombre', (req, res) => {
     const { nombre } = req.params;
 
@@ -233,7 +227,6 @@ app.delete('/api/sorteos/flyer/:nombre', (req, res) => {
     });
 });
 
-// 1. Obtener todas las configuraciones de los sorteos
 app.get('/api/config', (req, res) => {
     db.all(`SELECT * FROM sorteos`, [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -254,7 +247,6 @@ app.get('/api/config', (req, res) => {
     });
 });
 
-// 2. Guardar o actualizar configuración / premios de un sorteo
 app.post('/api/config', (req, res) => {
     const { nombre, fecha, hora, valor, p1, p2, p3 } = req.body;
     
@@ -275,7 +267,6 @@ app.post('/api/config', (req, res) => {
     );
 });
 
-// 3. Crear un nuevo sorteo
 app.post('/api/sorteos/crear', (req, res) => {
     const { nombre } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre de sorteo requerido' });
@@ -286,7 +277,6 @@ app.post('/api/sorteos/crear', (req, res) => {
     });
 });
 
-// 4. Eliminar / Finalizar un sorteo completo y sus boletas
 app.delete('/api/sorteos/:nombre', (req, res) => {
     const { nombre } = req.params;
     db.serialize(() => {
@@ -298,7 +288,7 @@ app.delete('/api/sorteos/:nombre', (req, res) => {
     });
 });
 
-// 5. Obtener todas las boletas de un sorteo específico (incluye vendedor y excedente)
+// 5. Obtener boletas (incluyendo vendedor y excedente)
 app.get('/api/boletas/:sorteo', (req, res) => {
     const { sorteo } = req.params;
     db.all(`SELECT numero, nombre, whatsapp, estado, vendedor, excedente FROM boletas WHERE sorteo = ?`, [sorteo], (err, rows) => {
@@ -318,7 +308,7 @@ app.get('/api/boletas/:sorteo', (req, res) => {
     });
 });
 
-// 6. Apartar o Confirmar Pago de un número (soporta vendedor y excedente)
+// 6. Guardar boleta (incluyendo vendedor y excedente)
 app.post('/api/boletas', (req, res) => {
     const { sorteo, numero, nombre, whatsapp, estado, vendedor, excedente } = req.body;
 
@@ -340,7 +330,6 @@ app.post('/api/boletas', (req, res) => {
     );
 });
 
-// 7. Liberar / Borrar un número específico
 app.delete('/api/boletas/:sorteo/:numero', (req, res) => {
     const { sorteo, numero } = req.params;
     db.run(`DELETE FROM boletas WHERE sorteo = ? AND numero = ?`, [sorteo, numero], function(err) {
@@ -349,7 +338,6 @@ app.delete('/api/boletas/:sorteo/:numero', (req, res) => {
     });
 });
 
-// 8. Notificar visita
 app.post('/api/notificar-visita', async (req, res) => {
     const { ip, ciudad, pais } = req.body;
     const mensaje = `👁️ <b>¡Alguien acaba de entrar a la página web!</b>\n📍 Ciudad: ${ciudad || 'Desconocida'}\n🌐 IP: ${ip || 'Desconocida'}`;
@@ -357,7 +345,6 @@ app.post('/api/notificar-visita', async (req, res) => {
     res.json({ success: true, message: "Visita notificada" });
 });
 
-// 9. Notificar selección
 app.post('/api/notificar-seleccion', async (req, res) => {
     const { numero, ip, ciudad } = req.body;
     const mensaje = `🍀 <b>¡Un aventurero está seleccionando números!</b>\n🔢 Primer número tocado: ${numero}\n📍 Ciudad: ${ciudad || 'Desconocida'}\n🌐 IP: ${ip || 'Desconocida'}`;
@@ -365,7 +352,6 @@ app.post('/api/notificar-seleccion', async (req, res) => {
     res.json({ success: true, message: "Selección notificada" });
 });
 
-// 10. Notificar pedido (soporta enlace de comprobante)
 app.post('/api/notificar-pedido', async (req, res) => {
     const { sorteo, numeros, total, ip, ciudad, urlComprobante } = req.body;
     
@@ -381,7 +367,6 @@ app.post('/api/notificar-pedido', async (req, res) => {
     res.json({ success: true, message: "Pedido notificado" });
 });
 
-// Iniciar servidor
 app.listen(PORT, () => {
     console.log(`Servidor de Suerte Real corriendo en el puerto ${PORT}`);
 });
