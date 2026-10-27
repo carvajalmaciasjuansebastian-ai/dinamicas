@@ -100,7 +100,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
     }
 });
 
-// Crear tablas si no existen (Actualizado para soportar 'flyer')
+// Crear tablas si no existen (Actualizado para soportar 'flyer', 'vendedor' y 'excedente')
 function inicializarBaseDeDatos() {
     db.serialize(() => {
         db.run(`CREATE TABLE IF NOT EXISTS sorteos (
@@ -114,7 +114,6 @@ function inicializarBaseDeDatos() {
             flyer TEXT
         )`, (err) => {
             if (!err) {
-                // Migración por si la tabla ya existía sin la columna flyer
                 db.run(`ALTER TABLE sorteos ADD COLUMN flyer TEXT`, () => {});
             }
         });
@@ -125,8 +124,14 @@ function inicializarBaseDeDatos() {
             nombre TEXT,
             whatsapp TEXT,
             estado TEXT,
+            vendedor TEXT,
+            excedente REAL DEFAULT 0,
             PRIMARY KEY (sorteo, numero)
         )`, () => {
+            // Migraciones seguras por si la tabla ya existía
+            db.run(`ALTER TABLE boletas ADD COLUMN vendedor TEXT`, () => {});
+            db.run(`ALTER TABLE boletas ADD COLUMN excedente REAL DEFAULT 0`, () => {});
+
             db.get(`SELECT COUNT(*) as count FROM sorteos`, (err, row) => {
                 if (row && row.count === 0) {
                     db.run(`INSERT INTO sorteos (nombre, fecha, hora, valor, p1, p2, p3) VALUES ('general', '', '', 15000, 0, 0, 0)`);
@@ -293,10 +298,10 @@ app.delete('/api/sorteos/:nombre', (req, res) => {
     });
 });
 
-// 5. Obtener todas las boletas de un sorteo específico
+// 5. Obtener todas las boletas de un sorteo específico (incluye vendedor y excedente)
 app.get('/api/boletas/:sorteo', (req, res) => {
     const { sorteo } = req.params;
-    db.all(`SELECT numero, nombre, whatsapp, estado FROM boletas WHERE sorteo = ?`, [sorteo], (err, rows) => {
+    db.all(`SELECT numero, nombre, whatsapp, estado, vendedor, excedente FROM boletas WHERE sorteo = ?`, [sorteo], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
 
         const boletasObj = {};
@@ -304,27 +309,29 @@ app.get('/api/boletas/:sorteo', (req, res) => {
             boletasObj[row.numero] = {
                 nombre: row.nombre,
                 whatsapp: row.whatsapp,
-                estado: row.estado
+                estado: row.estado,
+                vendedor: row.vendedor || 'La Casa / Web Directo',
+                excedente: row.excedente || 0
             };
         });
         res.json(boletasObj);
     });
 });
 
-// 6. Apartar o Confirmar Pago de un número
+// 6. Apartar o Confirmar Pago de un número (soporta vendedor y excedente)
 app.post('/api/boletas', (req, res) => {
-    const { sorteo, numero, nombre, whatsapp, estado } = req.body;
+    const { sorteo, numero, nombre, whatsapp, estado, vendedor, excedente } = req.body;
 
-    db.run(`INSERT INTO boletas (sorteo, numero, nombre, whatsapp, estado) 
-            VALUES (?, ?, ?, ?, ?)
+    db.run(`INSERT INTO boletas (sorteo, numero, nombre, whatsapp, estado, vendedor, excedente) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(sorteo, numero) DO UPDATE SET 
-            nombre = ?, whatsapp = ?, estado = ?`,
-        [sorteo, numero, nombre, whatsapp, estado, nombre, whatsapp, estado],
+            nombre = ?, whatsapp = ?, estado = ?, vendedor = ?, excedente = ?`,
+        [sorteo, numero, nombre, whatsapp, estado, vendedor || 'La Casa / Web Directo', excedente || 0, nombre, whatsapp, estado, vendedor || 'La Casa / Web Directo', excedente || 0],
         async function(err) {
             if (err) return res.status(500).json({ error: err.message });
             
-            if (estado === 'apartado' || estado === 'confirmado') {
-                const mensaje = `🎯 <b>¡Nuevo movimiento en boletas!</b>\n\n🎲 Sorteo: <b>${sorteo}</b>\n🔢 Número: <b>${numero}</b>\n👤 Cliente: ${nombre}\n📱 WhatsApp: ${whatsapp}\n📌 Estado: <b>${estado.toUpperCase()}</b>`;
+            if (estado === 'apartado' || estado === 'confirmado' || estado === 'pagado') {
+                const mensaje = `🎯 <b>¡Nuevo movimiento en boletas!</b>\n\n🎲 Sorteo: <b>${sorteo}</b>\n🔢 Número: <b>${numero}</b>\n👤 Cliente: ${nombre}\n🏷️ Vendedor: <b>${vendedor || 'La Casa / Web Directo'}</b>\n📱 WhatsApp: ${whatsapp}\n📌 Estado: <b>${estado.toUpperCase()}</b>`;
                 await enviarNotificacionTelegram(mensaje);
             }
 
