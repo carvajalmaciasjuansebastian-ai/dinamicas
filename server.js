@@ -164,7 +164,7 @@ app.post('/api/upload-comprobante', upload.single('comprobante'), (req, res) => 
 
 // 0. Redirección para Grupo de WhatsApp
 app.get('/unirse-grupo', (req, res) => {
-    const LINK_GRUPO = "https://chat.whatsapp.com/CF7FdHHK7NyHQrtI0AUbIv?s=sh&p=a&mlu=4&ilr=4";
+    const LINK_GRUPO = "https://chat.whatsapp.com/JcgkvY4FRNvHlmOkicIyjT?s=cl&p=a&iam=2";
     
     if (TELEGRAM_TOKEN && TELEGRAM_CHAT_ID) {
         const mensaje = `☘️ <b>¡Alguien hizo clic para unirse al Grupo VIP!</b>\n🔄 Redirigiendo a WhatsApp...`;
